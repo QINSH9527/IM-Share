@@ -5,64 +5,6 @@ let downloadDisplayedCount = 5;
 let uploadLoading = false;
 let downloadLoading = false;
 
-// 全局系统配置
-let systemConfig = {
-    max_upload_size: 50,
-    max_downloads: 10,
-    max_expire_hours: 72,
-    allowed_extensions: 'jpg,jpeg,png,gif,pdf,doc,docx,xls,xlsx,ppt,pptx,txt,zip,rar,mp4,mp3'
-};
-
-// 加载系统配置
-async function loadSystemConfig() {
-    try {
-        const response = await fetch('/admin/config');
-        if (response.ok) {
-            const config = await response.json();
-            systemConfig = {
-                max_upload_size: parseInt(config.max_upload_size) || 50,
-                max_downloads: parseInt(config.max_downloads) || 10,
-                max_expire_hours: parseInt(config.max_expire_hours) || 72,
-                allowed_extensions: config.allowed_extensions || 'jpg,jpeg,png,gif,pdf,doc,docx,xls,xlsx,ppt,pptx,txt,zip,rar,mp4,mp3'
-            };
-            
-            // 更新前端界面
-            updateFrontendLimits();
-            updateConfigDisplay();
-        }
-    } catch (error) {
-        console.error('加载系统配置失败:', error);
-    }
-}
-
-// 更新前端限制
-function updateFrontendLimits() {
-    // 更新最大下载次数选项
-    const maxDownloadsSelect = document.getElementById('max_downloads');
-    if (maxDownloadsSelect) {
-        maxDownloadsSelect.max = systemConfig.max_downloads;
-        maxDownloadsSelect.value = Math.min(parseInt(maxDownloadsSelect.value) || 1, systemConfig.max_downloads);
-    }
-    
-    // 更新最大分享时限选项
-    const expireHoursSelect = document.getElementById('expire_hours');
-    if (expireHoursSelect) {
-        expireHoursSelect.max = systemConfig.max_expire_hours;
-        expireHoursSelect.value = Math.min(parseInt(expireHoursSelect.value) || 24, systemConfig.max_expire_hours);
-    }
-}
-
-// 更新配置显示
-function updateConfigDisplay() {
-    const maxSizeDisplay = document.getElementById('max-size-display');
-    const maxDownloadsDisplay = document.getElementById('max-downloads-display');
-    const maxHoursDisplay = document.getElementById('max-hours-display');
-    
-    if (maxSizeDisplay) maxSizeDisplay.textContent = `${systemConfig.max_upload_size}MB`;
-    if (maxDownloadsDisplay) maxDownloadsDisplay.textContent = `${systemConfig.max_downloads}次`;
-    if (maxHoursDisplay) maxHoursDisplay.textContent = `${systemConfig.max_expire_hours}小时`;
-}
-
 function showPage(page) {
     document.getElementById('main-page').style.display = 'none';
     document.getElementById('history-page').style.display = 'none';
@@ -84,8 +26,12 @@ function handleFileUpload(event) {
     const file = event.target.files[0];
     if (!file) return;
 
-    // 使用动态配置进行前端验证
-    const maxSizeMB = systemConfig.max_upload_size;
+    // 显示文件信息
+    const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2);
+    console.log(`上传文件: ${file.name}, 大小:${fileSizeMB}MB`);
+
+    // 预先检查文件大小（可选，作为前端验证）
+    const maxSizeMB = 50; // 与后端配置一致
     const maxSizeBytes = maxSizeMB * 1024 * 1024;
     if (file.size > maxSizeBytes) {
         showError(`文件大小超过限制（最大 ${maxSizeMB}MB）`);
@@ -93,25 +39,10 @@ function handleFileUpload(event) {
         return;
     }
 
-    // 检查文件扩展名
-    const allowedExtensions = systemConfig.allowed_extensions.split(',');
-    const fileExtension = file.name.split('.').pop().toLowerCase();
-    if (allowedExtensions.length > 0 && !allowedExtensions.includes(fileExtension)) {
-        showError(`不支持的文件类型：${fileExtension}，支持的类型：${allowedExtensions.join(', ')}`);
-        event.target.value = '';
-        return;
-    }
-
     const formData = new FormData();
     formData.append('file', file);
-    formData.append('max_downloads', Math.min(
-        parseInt(document.getElementById('max_downloads').value) || 1, 
-        systemConfig.max_downloads
-    ));
-    formData.append('expire_hours', Math.min(
-        parseInt(document.getElementById('expire_hours').value) || 24, 
-        systemConfig.max_expire_hours
-    ));
+    formData.append('max_downloads', document.getElementById('max_downloads').value || 1);
+    formData.append('expire_hours', document.getElementById('expire_hours').value || 24);
 
     fetch('/upload', {
         method: 'POST',
@@ -120,17 +51,21 @@ function handleFileUpload(event) {
     .then(async response => {
         // 检查响应状态
         if (!response.ok) {
+            // 尝试获取错误信息
+            const contentType = response.headers.get('content-type');
             let errorMessage = `上传失败 (${response.status})`;
             
             try {
-                const contentType = response.headers.get('content-type');
                 if (contentType && contentType.includes('application/json')) {
                     const errorData = await response.json();
                     errorMessage = errorData.error || errorMessage;
                 } else {
+                    // 如果不是JSON，可能是HTML错误页面
                     const errorText = await response.text();
-                    if (errorText.includes('413') || response.status === 413) {
-                        errorMessage = `文件大小超过限制（最大 ${systemConfig.max_upload_size}MB）`;
+                    if (errorText.includes('413') || errorText.includes('Request Entity Too Large')) {
+                        errorMessage = '文件大小超过限制（最大 50MB）';
+                    } else if (errorText.includes('415') || errorText.includes('Unsupported Media Type')) {
+                        errorMessage = '不支持的文件类型';
                     }
                 }
             } catch (e) {
@@ -140,11 +75,15 @@ function handleFileUpload(event) {
             throw new Error(errorMessage);
         }
         
-        try {
-            return await response.json();
-        } catch (e) {
+        // 如果响应正常，尝试解析JSON
+        const contentType = response.headers.get('content-type');
+        if (!contentType || !contentType.includes('application/json')) {
+            const text = await response.text();
+            console.error('服务器返回非JSON响应:', text);
             throw new Error('服务器响应格式错误');
         }
+        
+        return response.json();
     })
     .then(data => {
         if (data.success) {
@@ -194,6 +133,7 @@ function handleFileUpload(event) {
     });
 }
 
+
 function updateButtonText() {
     const deleteCode = document.getElementById('delete-code').value;
     const actionButton = document.getElementById('action-button');
@@ -223,27 +163,17 @@ function handleReceive() {
     
     const code = extractCode || deleteCode;
     
-    // 关键修复：直接尝试操作，让后端判断是提取码还是删除码
-    fetch(`/d/${code}`)
+    // 先获取文件信息，再决定如何处理
+    fetch(`/file-info/${code}`)
     .then(async response => {
-        // 检查响应状态
         if (!response.ok) {
-            let errorMessage = `操作失败 (${response.status})`;
+            const contentType = response.headers.get('content-type');
+            let errorMessage = `获取文件信息失败 (${response.status})`;
             
             try {
-                const contentType = response.headers.get('content-type');
                 if (contentType && contentType.includes('application/json')) {
                     const errorData = await response.json();
                     errorMessage = errorData.error || errorMessage;
-                } else {
-                    const errorText = await response.text();
-                    if (errorText.includes('文件已过期')) {
-                        errorMessage = '文件已过期';
-                    } else if (errorText.includes('已达到最大下载次数')) {
-                        errorMessage = '已达到最大下载次数';
-                    } else if (errorText.includes('文件不存在')) {
-                        errorMessage = '文件不存在或已被删除';
-                    }
                 }
             } catch (e) {
                 console.warn('无法解析错误响应:', e);
@@ -252,57 +182,48 @@ function handleReceive() {
             throw new Error(errorMessage);
         }
         
-        // 检查响应类型
         const contentType = response.headers.get('content-type');
-        const contentDisposition = response.headers.get('content-disposition');
+        if (!contentType || !contentType.includes('application/json')) {
+            const text = await response.text();
+            console.error('服务器返回非JSON响应:', text);
+            throw new Error('服务器响应格式错误');
+        }
         
-        if (contentDisposition && contentDisposition.includes('attachment')) {
-            // 这是文件下载（提取码）
-            // 关键修复：直接使用当前响应，不重复请求
-            const blob = await response.blob();
-            const url = window.URL.createObjectURL(blob);
-            
-            // 从content-disposition头获取文件名
-            let filename = '下载的文件';
-            if (contentDisposition) {
-                const filenameMatch = contentDisposition.match(/filename[^;=\n]*=((['"]).*?\2|[^;\n]*)/);
-                if (filenameMatch && filenameMatch[1]) {
-                    filename = filenameMatch[1].replace(/['"]/g, '');
+        return response.json();
+    })
+    .then(data => {
+        if (data.error) {
+            // 如果获取文件信息失败，可能是删除码，尝试删除
+            fetch(`/d/${code}`)
+            .then(async response => {
+                if (!response.ok) {
+                    const contentType = response.headers.get('content-type');
+                    let errorMessage = `操作失败 (${response.status})`;
+                    
+                    try {
+                        if (contentType && contentType.includes('application/json')) {
+                            const errorData = await response.json();
+                            errorMessage = errorData.error || errorMessage;
+                        }
+                    } catch (e) {
+                        console.warn('无法解析错误响应:', e);
+                    }
+                    
+                    throw new Error(errorMessage);
                 }
-            }
-            
-            // 创建下载链接
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = filename;
-            document.body.appendChild(a);
-            a.click();
-            document.body.removeChild(a);
-            
-            // 清理URL对象
-            window.URL.revokeObjectURL(url);
-            
-            // 添加到下载历史
-            const newDownload = {
-                id: Date.now(),
-                filename: filename,
-                time: new Date().toLocaleString()
-            };
-            downloadHistory.unshift(newDownload);
-            localStorage.setItem('downloadHistory', JSON.stringify(downloadHistory));
-            
-            // 清空输入框
-            document.getElementById('extract-code').value = '';
-            document.getElementById('delete-code').value = '';
-            updateButtonText();
-            
-            showSuccess('文件下载成功');
-        } else if (contentType && contentType.includes('application/json')) {
-            // 这是JSON响应（删除码）
-            try {
-                const data = await response.json();
-                if (data.message) {
-                    showSuccess(data.message);
+                
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    const text = await response.text();
+                    console.error('服务器返回非JSON响应:', text);
+                    throw new Error('服务器响应格式错误');
+                }
+                
+                return response.json();
+            })
+            .then(deleteData => {
+                if (deleteData.message) {
+                    showSuccess(deleteData.message);
                     
                     // 从上传历史中移除
                     uploadHistory = uploadHistory.filter(item => 
@@ -315,20 +236,42 @@ function handleReceive() {
                     document.getElementById('delete-code').value = '';
                     updateButtonText();
                 } else {
-                    throw new Error(data.error || '操作失败');
+                    showError(deleteData.error || '操作失败');
                 }
-            } catch (e) {
-                throw new Error('服务器响应格式错误');
-            }
+            })
+            .catch(error => {
+                showError('操作过程中发生错误: ' + error.message);
+            });
         } else {
-            throw new Error('服务器响应格式错误');
+            // 这是提取码，直接下载文件
+            // 创建下载链接，避免重复请求
+            const a = document.createElement('a');
+            a.href = `/d/${code}`;
+            a.download = data.filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            
+            // 添加到下载历史
+            const newDownload = {
+                id: Date.now(),
+                filename: data.filename,
+                time: new Date().toLocaleString()
+            };
+            downloadHistory.unshift(newDownload);
+            localStorage.setItem('downloadHistory', JSON.stringify(downloadHistory));
+            
+            // 清空输入框
+            document.getElementById('extract-code').value = '';
+            document.getElementById('delete-code').value = '';
+            updateButtonText();
         }
     })
     .catch(error => {
-        console.error('操作错误详情:', error);
-        showError('操作过程中发生错误: ' + error.message);
+        showError('获取文件信息时发生错误: ' + error.message);
     });
 }
+
 
 function updateHistoryPage() {
     updateUploadHistory();
@@ -528,9 +471,6 @@ function showSuccess(message) {
 
 // 页面加载完成后的初始化
 document.addEventListener('DOMContentLoaded', function() {
-    // 加载系统配置
-    loadSystemConfig();
-    
     // 点击空白处关闭弹窗
     document.getElementById('success-modal').addEventListener('click', function(e) {
         if (e.target === this) {
@@ -561,20 +501,11 @@ document.addEventListener('DOMContentLoaded', function() {
         const files = e.dataTransfer.files;
         if (files.length > 0) {
             const file = files[0];
+            const fileSizeMB = (file.size / (1024 * 1024)).toFixed(2);
+            const maxSizeMB = 50;
             
-            // 使用动态配置检查文件大小
-            const maxSizeMB = systemConfig.max_upload_size;
-            const maxSizeBytes = maxSizeMB * 1024 * 1024;
-            if (file.size > maxSizeBytes) {
-                showError(`文件大小超过限制（最大 ${maxSizeMB}MB）`);
-                return;
-            }
-            
-            // 检查文件扩展名
-            const allowedExtensions = systemConfig.allowed_extensions.split(',');
-            const fileExtension = file.name.split('.').pop().toLowerCase();
-            if (allowedExtensions.length > 0 && !allowedExtensions.includes(fileExtension)) {
-                showError(`不支持的文件类型：${fileExtension}，支持的类型：${allowedExtensions.join(', ')}`);
+            if (file.size > maxSizeMB * 1024 * 1024) {
+                showError(`文件 "${file.name}" 大小${fileSizeMB}MB 超过限制（最大 ${maxSizeMB}MB）`);
                 return;
             }
             

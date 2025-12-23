@@ -47,7 +47,17 @@
                             <p>选择文件</p>
                             <small>或拖拽到白色区域内</small>
                             <input type="file" id="file-input" style="display: none;" onchange="handleFileUpload(event)">
+                            <!-- 在上传区域添加配置信息显示 -->
+                            <div class="upload-info">
+                                <small>
+                                    最大文件大小：<span id="max-size-display">50MB</span> | 
+                                    最大下载次数：<span id="max-downloads-display">10次</span> | 
+                                    最大分享时限：<span id="max-hours-display">72小时</span>
+                                </small>
+                            </div>
                         </div>
+                        
+
                         
                         <div class="input-group">
                             <label for="max_downloads">最大下载次数</label>
@@ -131,8 +141,8 @@
             <span>{{ footer_text or '发送违法、违规等有害信息，会受到司法严惩。' }}</span>
         </div>
         <div class="checkbox-group">
-            <input type="checkbox" id="agreement" checked>
-            <label for="agreement">同意《用户服务协议》、《用户隐私政策》</label>
+            <!--<input type="checkbox" id="agreement" checked>-->
+            <label for="agreement">IM'MO</label>
         </div>
     </div>
 

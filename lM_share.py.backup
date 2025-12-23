@@ -13,8 +13,7 @@ from functools import wraps
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
-# 移除Flask的MAX_CONTENT_LENGTH限制，让后端代码自己处理
-# app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 注释掉这行
+app.config['MAX_CONTENT_LENGTH'] = 50 * 1024 * 1024  # 50MB limit
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///files.db'
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['SECRET_KEY'] = secrets.token_hex(32)  # 用于session
@@ -289,70 +288,6 @@ def admin_upload_logo():
     
     return jsonify({'success': True, 'logo_url': logo_url})
 
-@app.route('/upload', methods=['POST'])
-@ip_access_required
-def upload_file():
-    if 'file' not in request.files:
-        return jsonify({'error': '没有文件部分'}), 400
-    
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({'error': '没有选择文件'}), 400
-
-    # 从数据库获取配置的限制
-    max_upload_size = int(get_config('max_upload_size', '50')) * 1024 * 1024
-    allowed_extensions = get_config('allowed_extensions', '').split(',')
-    max_downloads = int(request.form.get('max_downloads', get_config('max_downloads', '10')))
-    expire_hours = int(request.form.get('expire_hours', get_config('max_expire_hours', '72')))
-    
-    # 检查文件大小
-    file_content = file.read()
-    if len(file_content) > max_upload_size:
-        return jsonify({'error': f'文件大小超过限制（{max_upload_size // (1024*1024)}MB）'}), 400
-    file.seek(0)  # 重置文件指针
-    
-    # 检查文件扩展名
-    if not file.filename or '.' not in file.filename:
-        return jsonify({'error': '文件名无效'}), 400
-    
-    file_extension = file.filename.rsplit('.', 1)[1].lower()
-    if allowed_extensions and file_extension not in allowed_extensions:
-        return jsonify({'error': f'不支持的文件类型：{file_extension}，支持的类型：{", ".join(allowed_extensions)}'}), 400
-
-    try:
-        extract_code, delete_code = generate_codes()
-        file_id = uuid.uuid4().hex
-        filename_on_disk = f"{file_id}"
-        upload_folder = get_config('upload_folder', 'uploads')
-        save_path = os.path.join(upload_folder, filename_on_disk)
-        
-        # 确保上传目录存在
-        if not os.path.exists(upload_folder):
-            os.makedirs(upload_folder)
-        
-        file.save(save_path)
-
-        new_file = File(
-            original_filename=file.filename,
-            filename_on_disk=filename_on_disk,
-            extract_code=extract_code,
-            delete_code=delete_code,
-            expires_at=datetime.now() + timedelta(hours=expire_hours),
-            max_downloads=max_downloads
-        )
-        
-        db.session.add(new_file)
-        db.session.commit()
-        
-        return jsonify({
-            'success': True,
-            'extract_code': extract_code,
-            'delete_code': delete_code,
-            'filename': file.filename
-        })
-    except Exception as e:
-        return jsonify({'error': f'上传失败：{str(e)}'}), 500
-
 @app.route('/admin/cleanup', methods=['POST'])
 def admin_cleanup():
     if not session.get('admin_logged_in'):
@@ -511,124 +446,7 @@ def admin_stats():
     except Exception as e:
         return jsonify({'error': f'获取统计信息失败: {str(e)}'}), 500
 
-@app.route('/d/<code>', methods=['GET'])
-@ip_access_required
-def download_or_delete_file(code):
-    print(f"收到请求: {code}, 时间: {datetime.now()}")
-    
-    # 先检查是否是删除码
-    file_record = File.query.filter_by(delete_code=code).first()
-    if file_record:
-        print("这是删除码请求")
-        # 删除文件
-        try:
-            upload_folder = get_config('upload_folder', 'uploads')
-            file_path = os.path.join(upload_folder, file_record.filename_on_disk)
-            if os.path.exists(file_path):
-                os.remove(file_path)
-                print(f"用户主动删除文件: {file_record.original_filename}")
-        except Exception as e:
-            print(f"删除文件时出错: {e}")
-        
-        db.session.delete(file_record)
-        db.session.commit()
-        return jsonify({'message': '文件删除成功'}), 200
-    
-    # 如果不是删除码，检查是否是提取码
-    file_record = File.query.filter_by(extract_code=code).first()
-    if not file_record:
-        print("无效的提取码或删除码")
-        return jsonify({'error': '无效的提取码或删除码'}), 404
-
-    print(f"找到文件: {file_record.original_filename}, 当前下载次数: {file_record.current_downloads}/{file_record.max_downloads}")
-
-    # 检查文件是否过期
-    if datetime.now() > file_record.expires_at:
-        print("文件已过期")
-        return jsonify({'error': '文件已过期'}), 410
-
-    # 检查下载次数限制
-    if file_record.current_downloads >= file_record.max_downloads:
-        print("已达到最大下载次数")
-        return jsonify({'error': '已达到最大下载次数'}), 409
-
-    # 检查文件是否真实存在
-    upload_folder = get_config('upload_folder', 'uploads')
-    file_path = os.path.join(upload_folder, file_record.filename_on_disk)
-    if not os.path.exists(file_path):
-        print("文件不存在")
-        # 如果文件不存在，清理数据库记录
-        db.session.delete(file_record)
-        db.session.commit()
-        return jsonify({'error': '文件不存在'}), 404
-
-    # 使用数据库锁来确保原子性操作
-    try:
-        # 获取数据库锁
-        locked_record = File.query.filter_by(id=file_record.id).with_for_update().first()
-        
-        if not locked_record:
-            print("无法获取锁")
-            return jsonify({'error': '文件不存在'}), 404
-        
-        print(f"获取锁成功，当前下载次数: {locked_record.current_downloads}/{locked_record.max_downloads}")
-        
-        # 再次检查下载次数限制（在锁的保护下）
-        if locked_record.current_downloads >= locked_record.max_downloads:
-            print("已达到最大下载次数")
-            return jsonify({'error': '已达到最大下载次数'}), 409
-        
-        # 更新下载次数
-        old_count = locked_record.current_downloads
-        locked_record.current_downloads += 1
-        new_count = locked_record.current_downloads
-        
-        db.session.commit()
-        
-        print(f"更新下载次数: {old_count} -> {new_count}")
-        
-        # 返回文件
-        return send_from_directory(
-            upload_folder, 
-            locked_record.filename_on_disk, 
-            as_attachment=True, 
-            download_name=locked_record.original_filename
-        )
-        
-    except Exception as e:
-        db.session.rollback()
-        print(f"下载时出错: {e}")
-        return jsonify({'error': f'下载失败: {str(e)}'}), 500
-
-@app.route('/file-info/<code>', methods=['GET'])
-@ip_access_required
-def get_file_info(code):
-    file_record = File.query.filter_by(extract_code=code).first()
-    if not file_record:
-        return jsonify({'error': '无效的提取码'}), 404
-    
-    # 检查文件是否过期
-    if datetime.now() > file_record.expires_at:
-        return jsonify({'error': '文件已过期'}), 410
-    
-    # 检查是否达到下载次数限制
-    if file_record.current_downloads >= file_record.max_downloads:
-        return jsonify({'error': '已达到最大下载次数'}), 409
-    
-    # 检查文件是否真实存在
-    upload_folder = get_config('upload_folder', 'uploads')
-    file_path = os.path.join(upload_folder, file_record.filename_on_disk)
-    if not os.path.exists(file_path):
-        # 如果文件不存在，清理数据库记录
-        db.session.delete(file_record)
-        db.session.commit()
-        return jsonify({'error': '文件不存在'}), 404
-    
-    return jsonify({
-        'filename': file_record.original_filename
-    })
-
-# IP访问控制管理路由
+# IP访问控制管理路由 - 修复路由定义
 @app.route('/admin/ip-access', methods=['GET', 'POST'])
 @ip_access_required
 def admin_ip_access():
@@ -636,7 +454,7 @@ def admin_ip_access():
         return jsonify({'error': '未登录'}), 401
     
     if request.method == 'GET':
-        # 返回HTML页面
+        # 返回HTML页面而不是JSON
         return render_template('admin_ip.html')
     
     elif request.method == 'POST':
@@ -754,7 +572,9 @@ def admin_ip_access_data():
         'log_access': get_config('log_ip_access', 'true') == 'true'
     })
 
-# 获取当前客户端IP信息
+
+
+# 获取当前客户端IP信息 - 修复路由定义
 @app.route('/admin/current-ip', methods=['GET'])
 @ip_access_required
 def admin_current_ip():
@@ -765,6 +585,189 @@ def admin_current_ip():
     return jsonify({
         'current_ip': client_ip,
         'is_allowed': is_ip_allowed(client_ip)
+    })
+
+@app.route('/upload', methods=['POST'])
+@ip_access_required
+def upload_file():
+    if 'file' not in request.files:
+        return jsonify({'error': '没有文件部分'}), 400
+    
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': '没有选择文件'}), 400
+
+    # 获取配置的限制
+    max_upload_size = int(get_config('max_upload_size', '50')) * 1024 * 1024
+    allowed_extensions = get_config('allowed_extensions', '').split(',')
+    max_downloads = int(request.form.get('max_downloads', get_config('max_downloads', '10')))
+    expire_hours = int(request.form.get('expire_hours', get_config('max_expire_hours', '72')))
+    
+    # 关键修复：先检查文件大小
+    file_content = file.read()
+    if len(file_content) > max_upload_size:
+        return jsonify({'error': f'文件大小超过限制（{max_upload_size // (1024*1024)}MB）'}), 400
+    
+    # 重置文件指针
+    file.seek(0)
+    
+    # 检查文件扩展名
+    if not file.filename or '.' not in file.filename:
+        return jsonify({'error': '文件名无效'}), 400
+    
+    file_extension = file.filename.rsplit('.', 1)[1].lower()
+    if allowed_extensions and file_extension not in allowed_extensions:
+        return jsonify({'error': f'不支持的文件类型：{file_extension}，支持的类型：{", ".join(allowed_extensions)}'}), 400
+
+    try:
+        extract_code, delete_code = generate_codes()
+        file_id = uuid.uuid4().hex
+        filename_on_disk = f"{file_id}"
+        upload_folder = get_config('upload_folder', 'uploads')
+        save_path = os.path.join(upload_folder, filename_on_disk)
+        
+        # 确保上传目录存在
+        if not os.path.exists(upload_folder):
+            os.makedirs(upload_folder)
+        
+        file.save(save_path)
+
+        new_file = File(
+            original_filename=file.filename,
+            filename_on_disk=filename_on_disk,
+            extract_code=extract_code,
+            delete_code=delete_code,
+            expires_at=datetime.now() + timedelta(hours=expire_hours),
+            max_downloads=max_downloads
+        )
+        
+        db.session.add(new_file)
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'extract_code': extract_code,
+            'delete_code': delete_code,
+            'filename': file.filename
+        })
+    except Exception as e:
+        return jsonify({'error': f'上传失败：{str(e)}'}), 500
+
+@app.route('/d/<code>', methods=['GET'])
+@ip_access_required
+def download_or_delete_file(code):
+    print(f"收到请求: {code}, 时间: {datetime.now()}")
+    
+    # 先检查是否是删除码
+    file_record = File.query.filter_by(delete_code=code).first()
+    if file_record:
+        print("这是删除码请求")
+        # 删除文件
+        try:
+            upload_folder = get_config('upload_folder', 'uploads')
+            file_path = os.path.join(upload_folder, file_record.filename_on_disk)
+            if os.path.exists(file_path):
+                os.remove(file_path)
+                print(f"用户主动删除文件: {file_record.original_filename}")
+        except Exception as e:
+            print(f"删除文件时出错: {e}")
+        
+        db.session.delete(file_record)
+        db.session.commit()
+        return jsonify({'message': '文件删除成功'}), 200
+    
+    # 如果不是删除码，检查是否是提取码
+    file_record = File.query.filter_by(extract_code=code).first()
+    if not file_record:
+        print("无效的提取码或删除码")
+        return jsonify({'error': '无效的提取码或删除码'}), 404
+
+    print(f"找到文件: {file_record.original_filename}, 当前下载次数: {file_record.current_downloads}/{file_record.max_downloads}")
+
+    # 检查文件是否过期
+    if datetime.now() > file_record.expires_at:
+        print("文件已过期")
+        return jsonify({'error': '文件已过期'}), 410
+
+    # 检查下载次数限制
+    if file_record.current_downloads >= file_record.max_downloads:
+        print("已达到最大下载次数")
+        return jsonify({'error': '已达到最大下载次数'}), 409
+
+    # 检查文件是否真实存在
+    upload_folder = get_config('upload_folder', 'uploads')
+    file_path = os.path.join(upload_folder, file_record.filename_on_disk)
+    if not os.path.exists(file_path):
+        print("文件不存在")
+        # 如果文件不存在，清理数据库记录
+        db.session.delete(file_record)
+        db.session.commit()
+        return jsonify({'error': '文件不存在'}), 404
+
+    # 使用数据库锁来确保原子性操作
+    try:
+        # 获取数据库锁
+        locked_record = File.query.filter_by(id=file_record.id).with_for_update().first()
+        
+        if not locked_record:
+            print("无法获取锁")
+            return jsonify({'error': '文件不存在'}), 404
+        
+        print(f"获取锁成功，当前下载次数: {locked_record.current_downloads}/{locked_record.max_downloads}")
+        
+        # 再次检查下载次数限制（在锁的保护下）
+        if locked_record.current_downloads >= locked_record.max_downloads:
+            print("已达到最大下载次数")
+            return jsonify({'error': '已达到最大下载次数'}), 409
+        
+        # 更新下载次数
+        old_count = locked_record.current_downloads
+        locked_record.current_downloads += 1
+        new_count = locked_record.current_downloads
+        
+        db.session.commit()
+        
+        print(f"更新下载次数: {old_count} -> {new_count}")
+        
+        # 返回文件
+        return send_from_directory(
+            upload_folder, 
+            locked_record.filename_on_disk, 
+            as_attachment=True, 
+            download_name=locked_record.original_filename
+        )
+        
+    except Exception as e:
+        db.session.rollback()
+        print(f"下载时出错: {e}")
+        return jsonify({'error': f'下载失败: {str(e)}'}), 500
+
+@app.route('/file-info/<code>', methods=['GET'])
+@ip_access_required
+def get_file_info(code):
+    file_record = File.query.filter_by(extract_code=code).first()
+    if not file_record:
+        return jsonify({'error': '无效的提取码'}), 404
+    
+    # 检查文件是否过期
+    if datetime.now() > file_record.expires_at:
+        return jsonify({'error': '文件已过期'}), 410
+    
+    # 检查是否达到下载次数限制
+    if file_record.current_downloads >= file_record.max_downloads:
+        return jsonify({'error': '已达到最大下载次数'}), 409
+    
+    # 检查文件是否真实存在
+    upload_folder = get_config('upload_folder', 'uploads')
+    file_path = os.path.join(upload_folder, file_record.filename_on_disk)
+    if not os.path.exists(file_path):
+        # 如果文件不存在，清理数据库记录
+        db.session.delete(file_record)
+        db.session.commit()
+        return jsonify({'error': '文件不存在'}), 404
+    
+    return jsonify({
+        'filename': file_record.original_filename
     })
 
 def cleanup_expired_and_limit_reached_files():
