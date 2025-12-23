@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ site_title }} - {{ site_subtitle }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+</head>
+<body>
+    <div class="header">
+        <div class="container">
+            <div class="header-content">
+                <div class="logo" onclick="goToAdmin()" style="cursor: pointer;">
+                    <img src="{{ logo_url }}" alt="{{ site_title }}LOGO">
+                    <div class="logo-text">
+                        <h1>{{ site_title }}</h1>
+                        <p>{{ site_subtitle }}</p>
+                    </div>
+                </div>
+                <div class="nav">
+                    <a href="#" class="active" onclick="showPage('main'); return false;">文件传输</a>
+                    <a href="#" onclick="showPage('history'); return false;">收发记录</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="page-header">
+        <div class="container">
+            <p>{{ header_text or '简单快速，安全可靠的文件传输服务' }}</p>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <div class="container">
+            <div id="main-page">
+                <div class="content-grid">
+                    <!-- 发文件区域 -->
+                    <div class="content-card">
+                        <div class="card-header">
+                            <h2>📤 发送文件</h2>
+                            <p>简单2步，极速传文件给他人</p>
+                        </div>
+                        
+                        <div class="upload-area" onclick="document.getElementById('file-input').click()">
+                            <i>📁</i>
+                            <p>选择文件</p>
+                            <small>或拖拽到白色区域内</small>
+                            <input type="file" id="file-input" style="display: none;" onchange="handleFileUpload(event)">
+                        </div>
+                        
+                        <div class="input-group">
+                            <label for="max_downloads">最大下载次数</label>
+                            <input type="number" id="max_downloads" value="1" min="1" max="10">
+                        </div>
+                        
+                        <div class="input-group">
+                            <label for="expire_hours">分享时限 (小时)</label>
+                            <input type="number" id="expire_hours" value="24" min="1" max="72">
+                        </div>
+                    </div>
+
+                    <!-- 收文件区域 -->
+                    <div class="content-card">
+                        <div class="card-header">
+                            <h2>📥 接收文件</h2>
+                            <p>输入提取码或删除码下载文件</p>
+                        </div>
+                        
+                        <div class="input-group">
+                            <label for="extract-code">提取码</label>
+                            <input type="text" id="extract-code" placeholder="请输入提取码" oninput="updateButtonText()">
+                        </div>
+                        
+                        <div class="input-group">
+                            <label for="delete-code">删除码</label>
+                            <input type="text" id="delete-code" placeholder="请输入删除码" oninput="updateButtonText()">
+                        </div>
+                        
+                        <button id="action-button" class="btn btn-primary" onclick="handleReceive()">
+                            下载文件
+                        </button>
+                        
+                        <div id="receive-error" class="message error"></div>
+                        <div id="receive-success" class="message success"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="history-page" style="display: none;">
+                <div class="history-grid">
+                    <!-- 上传记录 -->
+                    <div class="history-section">
+                        <div class="history-header">
+                            <h3 class="history-title">📤 上传记录</h3>
+                        </div>
+                        <div id="upload-history-content" class="history-content" onscroll="handleScroll('upload', this)">
+                            <div class="empty-state">
+                                <i>📂</i>
+                                <p>暂无上传记录</p>
+                            </div>
+                        </div>
+                        <div id="upload-loading" class="loading-indicator">
+                            加载中...
+                        </div>
+                    </div>
+
+                    <!-- 下载记录 -->
+                    <div class="history-section">
+                        <div class="history-header">
+                            <h3 class="history-title">📥 下载记录</h3>
+                        </div>
+                        <div id="download-history-content" class="history-content" onscroll="handleScroll('download', this)">
+                            <div class="empty-state">
+                                <i>💾</i>
+                                <p>暂无下载记录</p>
+                            </div>
+                        </div>
+                        <div id="download-loading" class="loading-indicator">
+                            加载中...
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        <div class="warning">
+            <span>⚠️</span>
+            <span>{{ footer_text or '发送违法、违规等有害信息，会受到司法严惩。' }}</span>
+        </div>
+        <div class="checkbox-group">
+            <input type="checkbox" id="agreement" checked>
+            <label for="agreement">同意《用户服务协议》、《用户隐私政策》</label>
+        </div>
+    </div>
+
+    <!-- 成功弹窗 -->
+    <div id="success-modal" class="modal-overlay">
+        <div class="modal-content">
+            <button class="close-btn" onclick="closeModal()">✕</button>
+            <h3 style="margin-top: 0; margin-bottom: 25px; color: #333;">🎉 文件上传成功！</h3>
+            
+            <div class="code-display">
+                <div class="code-label">提取码</div>
+                <div class="code-value" id="extract-code-display" onclick="copyExtractCode()">
+                    <span id="extract-code-text">ABC123</span>
+                    <span id="extract-copy-indicator" class="copy-indicator">已自动复制</span>
+                </div>
+            </div>
+            
+            <div class="code-display">
+                <div class="code-label">删除码（仅显示一次）</div>
+                <div class="code-value" id="delete-code-display" onclick="copyDeleteCode()">
+                    <span id="delete-code-text">XYZ789012345</span>
+                    <span id="delete-copy-indicator" class="copy-indicator pending">点击复制</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html>

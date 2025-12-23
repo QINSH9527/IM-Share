@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>哈希测试</title>
+</head>
+<body>
+    <h1>哈希计算测试</h1>
+    <input type="file" id="testFile">
+    <button onclick="testHash()">测试哈希</button>
+    <div id="results"></div>
+
+    <script>
+        async function testHash() {
+            const file = document.getElementById('testFile').files[0];
+            if (!file) {
+                alert('请选择文件');
+                return;
+            }
+
+            // 前端计算哈希
+            const arrayBuffer = await file.arrayBuffer();
+            const uint8Array = new Uint8Array(arrayBuffer);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', uint8Array);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            const frontendHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+            // 发送到后端计算哈希
+            const formData = new FormData();
+            formData.append('file', file);
+
+            const response = await fetch('/test/hash', {
+                method: 'POST',
+                body: formData
+            });
+
+            const result = await response.json();
+
+            // 显示结果
+            document.getElementById('results').innerHTML = `
+                <h3>测试结果:</h3>
+                <p><strong>文件大小:</strong> ${result.file_size} bytes</p>
+                <p><strong>前端哈希:</strong> ${frontendHash}</p>
+                <p><strong>后端哈希:</strong> ${result.hash}</p>
+                <p><strong>是否匹配:</strong> ${frontendHash === result.hash ? '✅ 是' : '❌ 否'}</p>
+            `;
+        }
+    </script>
+</body>
+</html>

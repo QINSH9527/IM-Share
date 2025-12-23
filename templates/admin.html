@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>站长设置 - {{ site_title }}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
+    
+</head>
+<body>
+    <div class="header">
+        <div class="container">
+            <div class="header-content">
+                <h1>⚙️ 站长设置</h1>
+                <a href="/admin/logout" class="logout-btn">退出登录</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="container">
+        <div id="success-message" class="message success"></div>
+        <div id="error-message" class="message error"></div>
+        
+        <div class="settings-grid">
+            <!-- 基本设置 -->
+            <div class="settings-card">
+                <div class="card-header">
+                    <h2>🎨 基本设置</h2>
+                </div>
+                
+                <div class="form-group">
+                    <label for="site_title">网站标题</label>
+                    <input type="text" id="site_title" placeholder="请输入网站标题">
+                </div>
+                
+                <div class="form-group">
+                    <label for="site_subtitle">网站副标题</label>
+                    <input type="text" id="site_subtitle" placeholder="请输入网站副标题">
+                </div>
+                
+                <div class="form-group">
+                    <label for="logo_url">网站LOGO</label>
+                    <div class="logo-preview">
+                        <img id="logo-preview" src="" alt="LOGO预览">
+                        <div>
+                            <div class="file-input-wrapper">
+                                <label for="logo-upload" class="file-input-label">📷 上传新LOGO</label>
+                                <input type="file" id="logo-upload" accept="image/*">
+                            </div>
+                            <div class="extension-help">支持 PNG、JPG、GIF 格式</div>
+                        </div>
+                    </div>
+                    <input type="hidden" id="logo_url" placeholder="LOGO URL">
+                </div>
+                
+                <div class="form-group">
+                    <label for="header_text">页面顶部文字</label>
+                    <textarea id="header_text" placeholder="请输入页面顶部显示的文字"></textarea>
+                </div>
+                
+                <div class="form-group">
+                    <label for="footer_text">页面底部文字</label>
+                    <textarea id="footer_text" placeholder="请输入页面底部显示的文字"></textarea>
+                </div>
+            </div>
+
+            <!-- 上传设置 -->
+            <div class="settings-card">
+                <div class="card-header">
+                    <h2>📁 上传设置</h2>
+                </div>
+                
+                <div class="form-group">
+                    <label for="max_upload_size">最大上传大小 (MB)</label>
+                    <input type="number" id="max_upload_size" min="1" max="1000" placeholder="50">
+                </div>
+                
+                <div class="form-group">
+                    <label for="allowed_extensions">允许上传的文件类型</label>
+                    <input type="text" id="allowed_extensions" placeholder="jpg,jpeg,png,gif,pdf,doc,docx,xls,xlsx,ppt,pptx,txt,zip,rar,mp4,mp3">
+                    <div class="extension-help">用英文逗号分隔，例如：jpg,png,pdf</div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="upload_folder">文件存储位置</label>
+                    <input type="text" id="upload_folder" placeholder="uploads">
+                    <div class="extension-help">相对于项目根目录的路径</div>
+                </div>
+            </div>
+
+            <!-- 下载设置 -->
+            <div class="settings-card">
+                <div class="card-header">
+                    <h2>⬇️ 下载设置</h2>
+                </div>
+                
+                <div class="form-group">
+                    <label for="max_downloads">最大下载次数</label>
+                    <input type="number" id="max_downloads" min="1" max="100" placeholder="10">
+                    <div class="extension-help">用户上传文件时可设置的最大下载次数</div>
+                </div>
+                
+                <div class="form-group">
+                    <label for="max_expire_hours">最大分享时限 (小时)</label>
+                    <input type="number" id="max_expire_hours" min="1" max="720" placeholder="72">
+                    <div class="extension-help">用户上传文件时可设置的最大分享时间</div>
+                </div>
+            </div>
+
+            <!-- 安全设置 -->
+            <div class="settings-card">
+                <div class="card-header">
+                    <h2>🔐 安全设置</h2>
+                </div>
+                
+                <div class="form-group">
+                    <label for="admin_password">管理员密码</label>
+                    <input type="password" id="admin_password" placeholder="请输入新密码">
+                    <div class="extension-help">留空则不修改密码</div>
+                </div>
+
+                 <!-- 在管理功能区域添加 -->
+                <div class="admin-section">
+                    <h2>访问控制</h2><a href="/admin/ip-access" class="admin-link">IP访问控制</a>
+                </div>
+            </div>
+
+           
+
+
+            <!-- 系统管理 -->
+            <div class="settings-card">
+                <div class="card-header">
+                    <h2>🔧 系统管理</h2>
+                </div>
+                
+                <!-- 统计信息 -->
+                <div style="background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%); padding: 15px; border-radius: 10px; margin-bottom: 20px;">
+                    <h3 style="margin: 0 0 15px 0; color: #667eea; font-size: 16px;">📊 系统统计</h3>
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 14px;">
+                        <div>总文件数: <strong id="total-files">-</strong></div>
+                        <div>活跃文件: <strong id="active-files">-</strong></div>
+                        <div>已过期: <strong id="expired-files">-</strong></div>
+                        <div>达上限: <strong id="limit-reached-files">-</strong></div>
+                        <div style="grid-column: 1 / -1;">总大小: <strong id="total-size">-</strong></div>
+                        <div style="grid-column: 1 / -1;">存储位置: <strong id="upload-folder">-</strong></div>
+                    </div>
+                </div>
+                
+                <!-- 清理缓存 -->
+                <div style="margin-bottom: 20px;">
+                    <h3 style="margin: 0 0 10px 0; color: #667eea; font-size: 16px;">🧹 清理系统缓存</h3>
+                    <p style="margin: 0 0 15px 0; font-size: 13px; color: #666;">清理孤立的文件和临时数据，不会影响正常使用的文件</p>
+                    <button class="btn btn-primary" onclick="cleanupSystem()">🧹 一键清理</button>
+                </div>
+                
+                <!-- 重置系统 -->
+                <div style="border-top: 2px solid rgba(245, 101, 101, 0.2); padding-top: 20px;">
+                    <h3 style="margin: 0 0 10px 0; color: #f56565; font-size: 16px;">⚠️ 重置系统</h3>
+                    <p style="margin: 0 0 15px 0; font-size: 13px; color: #666;">删除所有文件和记录，恢复到初始状态（除管理员密码）</p>
+                    
+                    <div class="form-group">
+                        <label for="reset-confirm-password">确认管理员密码</label>
+                        <input type="password" id="reset-confirm-password" placeholder="请输入当前管理员密码以确认重置">
+                    </div>
+                    
+                    <button class="btn" style="background: linear-gradient(135deg, #f56565 0%, #ed64a6 100%); color: white;" onclick="resetSystem()">
+                        🔄 重置系统
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 30px;">
+            <button class="btn btn-success" onclick="saveSettings()">💾 保存设置</button>
+        </div>
+    </div>
+
+    <script src="{{ url_for('static', filename='js/admin.js') }}"></script
+</body>
+</html>
